@@ -367,3 +367,33 @@ h1 {
 .clear-all-button:hover {
   background-color: #c0392b;
 }
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+}
+
+.github-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #2ecc71;
+  text-decoration: none;
+  font-size: 14px;
+  padding: 8px 16px;
+  border: 1px solid #2ecc71;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.github-link:hover {
+  background-color: #2ecc71;
+  color: white;
+}
+
+.github-link svg {
+  width: 20px;
+  height: 20px;
+}
