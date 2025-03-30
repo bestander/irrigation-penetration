@@ -2,7 +2,7 @@
 
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-View%20Now-green)](https://bestander.github.io/irrigation-penetration)
 
-![Irrigation System Planner Demo](https://raw.githubusercontent.com/bestander/irrigation-penetration/master/recording.gif)
+![Irrigation System Planner Demo](https://raw.githubusercontent.com/bestander/irrigation-penetration/master/public/recording.gif)
 
 A web-based tool for planning irrigation systems by drawing zones on your backyard plan. This tool helps you visualize and calculate areas for regular irrigation zones, drip zones, and exclusion areas.
 
