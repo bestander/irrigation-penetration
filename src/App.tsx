@@ -26,17 +26,48 @@ function App() {
   const [dimensions, setDimensions] = useState<{ width: number; height: number } | null>(null);
   const [startPoint, setStartPoint] = useState<Point | null>(null);
   const [currentPath, setCurrentPath] = useState<Point[]>([]);
-  const [shapes, setShapes] = useState<Shape[]>([]);
+  const [shapes, setShapes] = useState<Shape[]>(() => {
+    // Load shapes from localStorage on initial render
+    const savedShapes = localStorage.getItem('irrigationShapes');
+    return savedShapes ? JSON.parse(savedShapes) : [];
+  });
   const [currentShape, setCurrentShape] = useState<Point[]>([]);
   const [selectedTool, setSelectedTool] = useState<DrawingTool>('regular');
-  const [ruler, setRuler] = useState<Ruler | null>(null);
-  const [pixelRatio, setPixelRatio] = useState<number | null>(null);
+  const [ruler, setRuler] = useState<Ruler | null>(() => {
+    // Load ruler from localStorage on initial render
+    const savedRuler = localStorage.getItem('irrigationRuler');
+    return savedRuler ? JSON.parse(savedRuler) : null;
+  });
+  const [pixelRatio, setPixelRatio] = useState<number | null>(() => {
+    // Load pixel ratio from localStorage on initial render
+    const savedRatio = localStorage.getItem('irrigationPixelRatio');
+    return savedRatio ? parseFloat(savedRatio) : null;
+  });
   const [showRulerPrompt, setShowRulerPrompt] = useState(false);
   const [rulerLength, setRulerLength] = useState<string>('');
   const [rulerUnit, setRulerUnit] = useState<'ft' | 'm'>('ft');
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const SNAP_THRESHOLD = 10; // pixels within which to snap to start point
+
+  // Save shapes to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('irrigationShapes', JSON.stringify(shapes));
+  }, [shapes]);
+
+  // Save ruler to localStorage whenever it changes
+  useEffect(() => {
+    if (ruler) {
+      localStorage.setItem('irrigationRuler', JSON.stringify(ruler));
+    }
+  }, [ruler]);
+
+  // Save pixel ratio to localStorage whenever it changes
+  useEffect(() => {
+    if (pixelRatio) {
+      localStorage.setItem('irrigationPixelRatio', pixelRatio.toString());
+    }
+  }, [pixelRatio]);
 
   const getShapeColor = (type: DrawingTool) => {
     switch (type) {
@@ -445,6 +476,15 @@ function App() {
     }
   };
 
+  const handleClearAll = () => {
+    // Clear all localStorage items
+    localStorage.removeItem('irrigationShapes');
+    localStorage.removeItem('irrigationRuler');
+    localStorage.removeItem('irrigationPixelRatio');
+    // Reload the page
+    window.location.reload();
+  };
+
   return (
     <div className="app-container">
       <h1>Irrigation System Planner</h1>
@@ -456,6 +496,11 @@ function App() {
           onChange={handleImageUpload}
           className="file-input"
         />
+        {shapes.length > 0 && (
+          <button onClick={handleClearAll} className="clear-all-button">
+            Clear All
+          </button>
+        )}
       </div>
 
       <div className="workspace">
