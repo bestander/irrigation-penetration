@@ -9,7 +9,7 @@ interface Point {
 interface Shape {
   points: Point[];
   area: number;
-  type: 'regular' | 'exclusion' | 'drip';
+  type: 'regular' | 'exclusion' | 'drip' | 'delete';
 }
 
 interface Ruler {
@@ -19,7 +19,7 @@ interface Ruler {
   unit: 'ft' | 'm';
 }
 
-type DrawingTool = 'regular' | 'exclusion' | 'drip' | 'ruler';
+type DrawingTool = 'regular' | 'exclusion' | 'drip' | 'ruler' | 'delete';
 
 function App() {
   const [image, setImage] = useState<string | null>(null);
@@ -48,6 +48,8 @@ function App() {
         return { fill: 'rgba(155, 89, 182, 0.2)', stroke: '#9b59b6' };
       case 'ruler':
         return { fill: 'transparent', stroke: '#f1c40f' };
+      case 'delete':
+        return { fill: 'transparent', stroke: '#e74c3c' };
     }
   };
 
@@ -423,6 +425,26 @@ function App() {
     setRulerLength('');
   };
 
+  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (selectedTool !== 'delete') return;
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const clickPoint = { x, y };
+
+    // Find the first shape that contains the click point
+    const shapeIndex = shapes.findIndex(shape => isPointInShape(clickPoint, shape.points));
+    
+    if (shapeIndex !== -1) {
+      // Remove the shape at the found index
+      setShapes(prev => prev.filter((_, index) => index !== shapeIndex));
+    }
+  };
+
   return (
     <div className="app-container">
       <h1>Irrigation System Planner</h1>
@@ -449,6 +471,7 @@ function App() {
                 onMouseMove={handleMouseMove}
                 onMouseUp={handleMouseUp}
                 onMouseLeave={handleMouseLeave}
+                onClick={handleCanvasClick}
                 className="drawing-layer"
               />
             )}
@@ -486,6 +509,12 @@ function App() {
             onClick={() => setSelectedTool('ruler')}
           >
             Ruler
+          </button>
+          <button
+            className={`tool-button ${selectedTool === 'delete' ? 'active' : ''}`}
+            onClick={() => setSelectedTool('delete')}
+          >
+            Delete
           </button>
         </div>
       </div>
