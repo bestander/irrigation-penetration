@@ -22,8 +22,15 @@ interface Ruler {
 type DrawingTool = 'regular' | 'exclusion' | 'drip' | 'ruler' | 'delete';
 
 function App() {
-  const [image, setImage] = useState<string | null>(null);
-  const [dimensions, setDimensions] = useState<{ width: number; height: number } | null>(null);
+  const [image, setImage] = useState<string | null>(() => {
+    // Load image from localStorage on initial render
+    return localStorage.getItem('irrigationImage');
+  });
+  const [dimensions, setDimensions] = useState<{ width: number; height: number } | null>(() => {
+    // Load dimensions from localStorage on initial render
+    const savedDimensions = localStorage.getItem('irrigationDimensions');
+    return savedDimensions ? JSON.parse(savedDimensions) : null;
+  });
   const [startPoint, setStartPoint] = useState<Point | null>(null);
   const [currentPath, setCurrentPath] = useState<Point[]>([]);
   const [shapes, setShapes] = useState<Shape[]>(() => {
@@ -69,6 +76,16 @@ function App() {
     }
   }, [pixelRatio]);
 
+  // Save image and dimensions to localStorage whenever they change
+  useEffect(() => {
+    if (image) {
+      localStorage.setItem('irrigationImage', image);
+    }
+    if (dimensions) {
+      localStorage.setItem('irrigationDimensions', JSON.stringify(dimensions));
+    }
+  }, [image, dimensions]);
+
   const getShapeColor = (type: DrawingTool) => {
     switch (type) {
       case 'regular':
@@ -91,7 +108,8 @@ function App() {
       reader.onload = (e) => {
         const img = new Image();
         img.onload = () => {
-          setImage(e.target?.result as string);
+          const imageData = e.target?.result as string;
+          setImage(imageData);
           setDimensions({ width: img.width, height: img.height });
         };
         img.src = e.target?.result as string;
@@ -481,6 +499,8 @@ function App() {
     localStorage.removeItem('irrigationShapes');
     localStorage.removeItem('irrigationRuler');
     localStorage.removeItem('irrigationPixelRatio');
+    localStorage.removeItem('irrigationImage');
+    localStorage.removeItem('irrigationDimensions');
     // Reload the page
     window.location.reload();
   };
