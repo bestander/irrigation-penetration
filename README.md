@@ -1,46 +1,66 @@
-# Getting Started with Create React App
+# Irrigation System Planner
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+A web-based tool for planning irrigation systems by drawing zones on your backyard plan. This tool helps you visualize and calculate areas for regular irrigation zones, drip zones, and exclusion areas.
 
-## Available Scripts
+## Features
 
-In the project directory, you can run:
+- Upload your backyard plan image
+- Draw different types of zones:
+  - Regular irrigation zones (green)
+  - Drip zones (purple)
+  - Exclusion areas (red)
+- Measure distances using the ruler tool
+- Calculate areas in square feet or square meters
+- Automatic area calculations with proper handling of overlapping zones
+- Delete individual shapes or clear all
+- Persistent storage of your plan
+- Mobile-friendly interface
 
-### `npm start`
+## Usage
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in the browser.
+1. Upload your backyard plan image
+2. Use the ruler tool to set the scale by drawing a line and entering its real-world length
+3. Draw zones using the different tools:
+   - Regular Zone: For standard sprinkler areas
+   - Drip Zone: For drip irrigation areas
+   - Exclusion Zone: For areas that shouldn't be irrigated
+4. View the calculated areas for each zone type
+5. Delete shapes by selecting the delete tool and clicking on them
+6. Clear all shapes using the "Clear All" button
 
-The page will reload if you make edits.\
-You will also see any lint errors in the console.
+## Development
 
-### `npm test`
+To run the project locally:
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+```bash
+# Install dependencies
+npm install
 
-### `npm run build`
+# Start the development server
+npm start
+```
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+The app will open in your browser at [http://localhost:3000](http://localhost:3000).
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+## Deployment
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+The application is deployed to GitHub Pages at [https://bestander.github.io/irrigation-penetration](https://bestander.github.io/irrigation-penetration).
 
-### `npm run eject`
+To deploy updates:
 
-**Note: this is a one-way operation. Once you `eject`, you can’t go back!**
+```bash
+# Build and deploy to GitHub Pages
+npm run deploy
+```
 
-If you aren’t satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+## Technical Details
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you’re on your own.
+- Built with React and TypeScript
+- Uses HTML5 Canvas for drawing
+- Implements the Shoelace formula for area calculations
+- Stores data in localStorage for persistence
+- Deployed using GitHub Pages
 
-You don’t have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn’t feel obligated to use this feature. However we understand that this tool wouldn’t be useful if you couldn’t customize it when you are ready for it.
+## License
 
-## Learn More
-
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
-
-To learn React, check out the [React documentation](https://reactjs.org/).
+MIT License
