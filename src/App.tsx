@@ -36,6 +36,7 @@ const SHAPE_COLORS = {
   drip: { fill: 'rgba(155, 89, 182, 0.2)', stroke: '#9b59b6' },
   ruler: { fill: 'transparent', stroke: '#f1c40f' },
   delete: { fill: 'transparent', stroke: '#e74c3c' },
+  hover: { fill: 'transparent', stroke: '#3498db' },
 } as const;
 
 function App() {
@@ -65,6 +66,7 @@ function App() {
   const [showRulerPrompt, setShowRulerPrompt] = useState(false);
   const [rulerLength, setRulerLength] = useState<string>('');
   const [rulerUnit, setRulerUnit] = useState<'ft' | 'm'>('ft');
+  const [showHover, setShowHover] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -292,38 +294,40 @@ function App() {
 
     shapes.forEach(shape => drawShape(ctx, shape));
 
-    zoneRegions.forEach((region, index) => {
-      const isHovered = index === hoveredRegionIndex;
-      const baseOpacity = 0.1;
-      const hoverOpacity = 0.3;
-      const color = SHAPE_COLORS[region.type];
-      ctx.fillStyle = isHovered
-        ? color.fill.replace(/[\d.]+\)$/, `${hoverOpacity})`)
-        : color.fill.replace(/[\d.]+\)$/, `${baseOpacity})`);
+    if (showHover) {
+      zoneRegions.forEach((region, index) => {
+        const isHovered = index === hoveredRegionIndex;
+        const baseOpacity = 0.1;
+        const hoverOpacity = 0.3;
+        const color = SHAPE_COLORS[region.type];
+        ctx.fillStyle = isHovered
+          ? color.fill.replace(/[\d.]+\)$/, `${hoverOpacity})`)
+          : color.fill.replace(/[\d.]+\)$/, `${baseOpacity})`);
 
-      region.points.forEach(point => {
-        if (point.x % (GRID_SIZE * 2) === 0 && point.y % (GRID_SIZE * 2) === 0) {
-          ctx.fillRect(point.x, point.y, GRID_SIZE * 2, GRID_SIZE * 2);
+        region.points.forEach(point => {
+          if (point.x % (GRID_SIZE * 2) === 0 && point.y % (GRID_SIZE * 2) === 0) {
+            ctx.fillRect(point.x, point.y, GRID_SIZE * 2, GRID_SIZE * 2);
+          }
+        });
+
+        if (isHovered && hoverPosition) {
+          const area = calculateRegionArea(region.points);
+          const formattedArea = formatArea(area);
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+          const textWidth = ctx.measureText(formattedArea).width + 10;
+          const tooltipX = hoverPosition.x + 10;
+          const tooltipY = hoverPosition.y - 30;
+
+          const adjustedX = Math.min(tooltipX, dimensions.width - textWidth);
+          const adjustedY = Math.max(tooltipY, 20);
+
+          ctx.fillRect(adjustedX, adjustedY, textWidth, 20);
+          ctx.fillStyle = 'white';
+          ctx.font = '12px Arial';
+          ctx.fillText(formattedArea, adjustedX + 5, adjustedY + 15);
         }
       });
-
-      if (isHovered && hoverPosition) {
-        const area = calculateRegionArea(region.points);
-        const formattedArea = formatArea(area);
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-        const textWidth = ctx.measureText(formattedArea).width + 10;
-        const tooltipX = hoverPosition.x + 10;
-        const tooltipY = hoverPosition.y - 30;
-
-        const adjustedX = Math.min(tooltipX, dimensions.width - textWidth);
-        const adjustedY = Math.max(tooltipY, 20);
-
-        ctx.fillRect(adjustedX, adjustedY, textWidth, 20);
-        ctx.fillStyle = 'white';
-        ctx.font = '12px Arial';
-        ctx.fillText(formattedArea, adjustedX + 5, adjustedY + 15);
-      }
-    });
+    }
 
     if (currentShape.length > 0) {
       const color = getShapeColor(selectedTool);
@@ -337,7 +341,7 @@ function App() {
     if (currentPath.length > 1) {
       drawPath(ctx, currentPath, getShapeColor(selectedTool));
     }
-  }, [dimensions, shapes, currentShape, currentPath, selectedTool, ruler, hoveredRegionIndex, hoverPosition, zoneRegions]);
+  }, [dimensions, shapes, currentShape, currentPath, selectedTool, ruler, hoveredRegionIndex, hoverPosition, zoneRegions, showHover]);
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -550,6 +554,12 @@ function App() {
             onClick={() => setSelectedTool('delete')}
           >
             Delete
+          </button>
+          <button
+            className={`tool-button toggle ${showHover ? 'active' : ''}`}
+            onClick={() => setShowHover(!showHover)}
+          >
+            Show Areas
           </button>
         </div>
       </div>
