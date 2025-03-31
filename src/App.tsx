@@ -19,9 +19,15 @@ interface Ruler {
   unit: 'ft' | 'm';
 }
 
+interface Region {
+  points: Point[];
+  type: 'regular' | 'exclusion' | 'drip';
+}
+
 type DrawingTool = 'regular' | 'exclusion' | 'drip' | 'ruler' | 'delete';
 
-const GRID_SIZE = 10;
+const GRID_SIZE = 4;
+const CALCULATION_GRID_SIZE = 2;
 const SNAP_THRESHOLD = 10;
 
 const SHAPE_COLORS = {
@@ -130,134 +136,102 @@ function App() {
   const isPointInShape = (point: Point, shape: Point[]): boolean => {
     let inside = false;
     for (let i = 0, j = shape.length - 1; i < shape.length; j = i++) {
-      const xi = shape[i].x, yi = shape[i].y;
-      const xj = shape[j].x, yj = shape[j].y;
-      
-      if (((yi > point.y) !== (yj > point.y)) &&
-          (point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi)) {
+      const xi = shape[i].x,
+        yi = shape[i].y;
+      const xj = shape[j].x,
+        yj = shape[j].y;
+
+      if (((yi > point.y) !== (yj > point.y)) && point.x < ((xj - xi) * (point.y - yi)) / (yj - yi) + xi) {
         inside = !inside;
       }
     }
     return inside;
   };
 
-  const getGridPoints = (width: number, height: number): Point[] => {
-    const points: Point[] = [];
-    for (let x = 0; x < width; x += GRID_SIZE) {
-      for (let y = 0; y < height; y += GRID_SIZE) {
-        points.push({ x, y });
-      }
-    }
-    return points;
-  };
-
-  const calculateUninterruptedRegularArea = (): Point[][] => {
+  const calculateZoneRegions = (): Region[] => {
     const regularShapes = shapes.filter(shape => shape.type === 'regular');
     const exclusionShapes = shapes.filter(shape => shape.type === 'exclusion');
     const dripShapes = shapes.filter(shape => shape.type === 'drip');
     const visited: Set<string> = new Set();
-    const regions: Point[][] = [];
-  
+    const regions: Region[] = [];
+
     if (!dimensions) return [];
-  
+
     const getKey = (x: number, y: number) => `${x},${y}`;
-  
-    const isUninterrupted = (point: Point): boolean => {
-      const isInRegular = regularShapes.some(shape => isPointInShape(point, shape.points));
-      const isExcluded = exclusionShapes.some(shape => isPointInShape(point, shape.points));
-      const isInDrip = dripShapes.some(shape => isPointInShape(point, shape.points));
-      return isInRegular && !isExcluded && !isInDrip;
+
+    const getZoneTypeAtPoint = (point: Point): 'regular' | 'exclusion' | 'drip' | null => {
+      if (exclusionShapes.some(shape => isPointInShape(point, shape.points))) return 'exclusion';
+      if (dripShapes.some(shape => isPointInShape(point, shape.points))) return 'drip';
+      if (regularShapes.some(shape => isPointInShape(point, shape.points))) return 'regular';
+      return null;
     };
-  
-    const floodFill = (startX: number, startY: number): Point[] => {
+
+    const floodFill = (startX: number, startY: number, type: 'regular' | 'exclusion' | 'drip'): Point[] => {
       const region: Point[] = [];
       const queue: Point[] = [{ x: startX, y: startY }];
       const directions = [
-        { dx: 0, dy: -GRID_SIZE },
-        { dx: 0, dy: GRID_SIZE },
-        { dx: -GRID_SIZE, dy: 0 },
-        { dx: GRID_SIZE, dy: 0 },
+        { dx: 0, dy: -CALCULATION_GRID_SIZE },
+        { dx: 0, dy: CALCULATION_GRID_SIZE },
+        { dx: -CALCULATION_GRID_SIZE, dy: 0 },
+        { dx: CALCULATION_GRID_SIZE, dy: 0 },
       ];
-  
+
       while (queue.length > 0) {
         const { x, y } = queue.shift()!;
         const key = getKey(x, y);
-  
+
         if (
           visited.has(key) ||
-          x < 0 || x >= dimensions.width ||
-          y < 0 || y >= dimensions.height ||
-          !isUninterrupted({ x, y })
+          x < 0 ||
+          x >= dimensions.width ||
+          y < 0 ||
+          y >= dimensions.height
         ) {
           continue;
         }
-  
+
+        const pointType = getZoneTypeAtPoint({ x, y });
+        if (pointType !== type) continue;
+
         visited.add(key);
         region.push({ x, y });
-  
+
         for (const { dx, dy } of directions) {
           queue.push({ x: x + dx, y: y + dy });
         }
       }
-  
+
       return region;
     };
-  
-    for (let x = 0; x < dimensions.width; x += GRID_SIZE) {
-      for (let y = 0; y < dimensions.height; y += GRID_SIZE) {
+
+    for (let x = 0; x < dimensions.width; x += CALCULATION_GRID_SIZE) {
+      for (let y = 0; y < dimensions.height; y += CALCULATION_GRID_SIZE) {
         const key = getKey(x, y);
-        if (!visited.has(key) && isUninterrupted({ x, y })) {
-          const region = floodFill(x, y);
-          if (region.length > 0) {
-            regions.push(region);
+        if (!visited.has(key)) {
+          const type = getZoneTypeAtPoint({ x, y });
+          if (type) {
+            const region = floodFill(x, y, type);
+            if (region.length > 0) {
+              regions.push({ points: region, type });
+            }
           }
         }
       }
     }
-  
+
     return regions;
   };
 
-  const calculateTotalArea = (type: 'regular' | 'exclusion' | 'drip'): number => {
-    const shapesOfType = shapes.filter(shape => shape.type === type);
-    const exclusionShapes = shapes.filter(shape => shape.type === 'exclusion');
-    
-    if (!dimensions) return 0;
-
-    const gridPoints = getGridPoints(dimensions.width, dimensions.height);
-    
-    if (type === 'regular' || type === 'drip') {
-      let totalArea = 0;
-      let exclusionArea = 0;
-      let intersectionArea = 0;
-
-      gridPoints.forEach(point => {
-        const isInZone = shapesOfType.some(shape => isPointInShape(point, shape.points));
-        const isExcluded = exclusionShapes.some(shape => isPointInShape(point, shape.points));
-
-        if (isInZone) {
-          totalArea += GRID_SIZE * GRID_SIZE;
-        }
-        if (isExcluded) {
-          exclusionArea += GRID_SIZE * GRID_SIZE;
-        }
-        if (isInZone && isExcluded) {
-          intersectionArea += GRID_SIZE * GRID_SIZE;
-        }
-      });
-
-      return Math.max(0, totalArea - intersectionArea);
-    } else {
-      return gridPoints.reduce((area, point) => {
-        if (shapesOfType.some(shape => isPointInShape(point, shape.points))) {
-          return area + GRID_SIZE * GRID_SIZE;
-        }
-        return area;
-      }, 0);
-    }
+  const calculateRegionArea = (region: Point[]): number => {
+    return region.length * (CALCULATION_GRID_SIZE * CALCULATION_GRID_SIZE);
   };
 
-  const uninterruptedRegions = useMemo(() => calculateUninterruptedRegularArea(), [shapes, dimensions]);
+  const calculateTotalArea = (type: 'regular' | 'exclusion' | 'drip'): number => {
+    const regionsOfType = zoneRegions.filter(region => region.type === type);
+    return regionsOfType.reduce((total, region) => total + calculateRegionArea(region.points), 0);
+  };
+
+  const zoneRegions = useMemo(() => calculateZoneRegions(), [shapes, dimensions]);
 
   const formatArea = (pixelArea: number): string => {
     if (!pixelRatio) return 'Set ruler first';
@@ -282,7 +256,11 @@ function App() {
     ctx.stroke();
   };
 
-  const drawPath = (ctx: CanvasRenderingContext2D, points: Point[], color: typeof SHAPE_COLORS[keyof typeof SHAPE_COLORS]) => {
+  const drawPath = (
+    ctx: CanvasRenderingContext2D,
+    points: Point[],
+    color: typeof SHAPE_COLORS[keyof typeof SHAPE_COLORS]
+  ) => {
     if (points.length <= 1) return;
 
     ctx.strokeStyle = color.stroke;
@@ -298,12 +276,12 @@ function App() {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !dimensions) return;
-  
+
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-  
+
     ctx.clearRect(0, 0, dimensions.width, dimensions.height);
-  
+
     if (ruler) {
       const color = getShapeColor('ruler');
       drawPath(ctx, [ruler.start, ruler.end], color);
@@ -311,34 +289,42 @@ function App() {
       ctx.font = '16px Arial';
       ctx.fillText(`${ruler.length} ${ruler.unit}`, (ruler.start.x + ruler.end.x) / 2, (ruler.start.y + ruler.end.y) / 2);
     }
-  
+
     shapes.forEach(shape => drawShape(ctx, shape));
-  
-    uninterruptedRegions.forEach((region, index) => {
+
+    zoneRegions.forEach((region, index) => {
       const isHovered = index === hoveredRegionIndex;
-      ctx.fillStyle = isHovered ? 'rgba(46, 204, 113, 0.6)' : 'rgba(46, 204, 113, 0.2)';
-      region.forEach(point => {
-        ctx.fillRect(point.x, point.y, GRID_SIZE, GRID_SIZE);
+      const baseOpacity = 0.1;
+      const hoverOpacity = 0.3;
+      const color = SHAPE_COLORS[region.type];
+      ctx.fillStyle = isHovered
+        ? color.fill.replace(/[\d.]+\)$/, `${hoverOpacity})`)
+        : color.fill.replace(/[\d.]+\)$/, `${baseOpacity})`);
+
+      region.points.forEach(point => {
+        if (point.x % (GRID_SIZE * 2) === 0 && point.y % (GRID_SIZE * 2) === 0) {
+          ctx.fillRect(point.x, point.y, GRID_SIZE * 2, GRID_SIZE * 2);
+        }
       });
-  
+
       if (isHovered && hoverPosition) {
-        const area = calculateRegionArea(region);
+        const area = calculateRegionArea(region.points);
         const formattedArea = formatArea(area);
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
         const textWidth = ctx.measureText(formattedArea).width + 10;
         const tooltipX = hoverPosition.x + 10;
         const tooltipY = hoverPosition.y - 30;
-  
+
         const adjustedX = Math.min(tooltipX, dimensions.width - textWidth);
         const adjustedY = Math.max(tooltipY, 20);
-  
+
         ctx.fillRect(adjustedX, adjustedY, textWidth, 20);
         ctx.fillStyle = 'white';
         ctx.font = '12px Arial';
         ctx.fillText(formattedArea, adjustedX + 5, adjustedY + 15);
       }
     });
-  
+
     if (currentShape.length > 0) {
       const color = getShapeColor(selectedTool);
       const points = [...currentShape];
@@ -347,11 +333,11 @@ function App() {
       }
       drawPath(ctx, points, color);
     }
-  
+
     if (currentPath.length > 1) {
       drawPath(ctx, currentPath, getShapeColor(selectedTool));
     }
-  }, [dimensions, shapes, currentShape, currentPath, selectedTool, ruler, hoveredRegionIndex, hoverPosition, uninterruptedRegions]);
+  }, [dimensions, shapes, currentShape, currentPath, selectedTool, ruler, hoveredRegionIndex, hoverPosition, zoneRegions]);
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -364,20 +350,15 @@ function App() {
     setStartPoint({ x, y });
   };
 
-  const calculateRegionArea = (region: Point[]): number => {
-    const gridSize = 10;
-    return region.length * (gridSize * gridSize); // Area is number of grid cells times cell area
-  };
-
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas || !dimensions) return;
-  
+
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     const currentPoint = { x, y };
-  
+
     if (startPoint) {
       if (currentShape.length > 2 && isNearStartPoint(currentPoint, currentShape[0])) {
         setCurrentPath([startPoint, currentShape[0]]);
@@ -387,11 +368,11 @@ function App() {
     } else {
       const gridX = Math.floor(x / GRID_SIZE) * GRID_SIZE;
       const gridY = Math.floor(y / GRID_SIZE) * GRID_SIZE;
-  
-      const regionIndex = uninterruptedRegions.findIndex(region =>
-        region.some(p => p.x === gridX && p.y === gridY)
+
+      const regionIndex = zoneRegions.findIndex(region =>
+        region.points.some(p => p.x === gridX && p.y === gridY)
       );
-  
+
       if (regionIndex !== hoveredRegionIndex) {
         setHoveredRegionIndex(regionIndex !== -1 ? regionIndex : null);
         setHoverPosition(regionIndex !== -1 ? currentPoint : null);
@@ -416,7 +397,7 @@ function App() {
     } else if (selectedTool === 'delete') {
       const clickPoint = { x, y };
       const shapeIndex = shapes.findIndex(shape => isPointInShape(clickPoint, shape.points));
-      
+
       if (shapeIndex !== -1) {
         setShapes(prev => prev.filter((_, index) => index !== shapeIndex));
       }
@@ -448,15 +429,15 @@ function App() {
 
   const handleRulerSubmit = () => {
     if (!ruler || !rulerLength) return;
-    
+
     const length = parseFloat(rulerLength);
     if (isNaN(length)) return;
 
     const pixelDistance = calculatePixelDistance(ruler.start, ruler.end);
     const ratio = length / pixelDistance;
-    
+
     setPixelRatio(ratio);
-    setRuler(prev => prev ? { ...prev, length, unit: rulerUnit } : null);
+    setRuler(prev => (prev ? { ...prev, length, unit: rulerUnit } : null));
     setShowRulerPrompt(false);
     setRulerLength('');
   };
@@ -473,7 +454,7 @@ function App() {
     const clickPoint = { x, y };
 
     const shapeIndex = shapes.findIndex(shape => isPointInShape(clickPoint, shape.points));
-    
+
     if (shapeIndex !== -1) {
       setShapes(prev => prev.filter((_, index) => index !== shapeIndex));
     }
@@ -492,9 +473,9 @@ function App() {
     <div className="app-container">
       <div className="header">
         <h1>Irrigation System Planner</h1>
-        <a 
-          href="https://github.com/bestander/irrigation-penetration" 
-          target="_blank" 
+        <a
+          href="https://github.com/bestander/irrigation-penetration"
+          target="_blank"
           rel="noopener noreferrer"
           className="github-link"
         >
@@ -504,14 +485,9 @@ function App() {
           View Source
         </a>
       </div>
-      
+
       <div className="upload-section">
-        <input
-          type="file"
-          accept="image/*"
-          onChange={handleImageUpload}
-          className="file-input"
-        />
+        <input type="file" accept="image/*" onChange={handleImageUpload} className="file-input" />
         {shapes.length > 0 && (
           <button onClick={handleClearAll} className="clear-all-button">
             Clear All
@@ -538,9 +514,7 @@ function App() {
             )}
           </div>
         ) : (
-          <div className="placeholder">
-            Upload your backyard plan image to get started
-          </div>
+          <div className="placeholder">Upload your backyard plan image to get started</div>
         )}
       </div>
 
@@ -587,13 +561,13 @@ function App() {
             <input
               type="number"
               value={rulerLength}
-              onChange={(e) => setRulerLength(e.target.value)}
+              onChange={e => setRulerLength(e.target.value)}
               placeholder="Length"
               className="ruler-length-input"
             />
             <select
               value={rulerUnit}
-              onChange={(e) => setRulerUnit(e.target.value as 'ft' | 'm')}
+              onChange={e => setRulerUnit(e.target.value as 'ft' | 'm')}
               className="ruler-unit-select"
             >
               <option value="ft">feet</option>
