@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import './App.css';
 
 interface Point {
@@ -26,6 +26,8 @@ function App() {
     // Load image from localStorage on initial render
     return localStorage.getItem('irrigationImage');
   });
+  const [hoveredRegionIndex, setHoveredRegionIndex] = useState<number | null>(null);
+  const [hoverPosition, setHoverPosition] = useState<Point | null>(null);
   const [dimensions, setDimensions] = useState<{ width: number; height: number } | null>(() => {
     // Load dimensions from localStorage on initial render
     const savedDimensions = localStorage.getItem('irrigationDimensions');
@@ -141,27 +143,89 @@ function App() {
     return Math.sqrt(dx * dx + dy * dy);
   };
 
-  const calculateIntersectionArea = (shape1: Point[], shape2: Point[]): number => {
-    // Simple intersection calculation using bounding boxes
-    // This is an approximation - for more accurate results we'd need a proper polygon intersection algorithm
-    const getBounds = (points: Point[]) => {
-      const xs = points.map(p => p.x);
-      const ys = points.map(p => p.y);
-      return {
-        minX: Math.min(...xs),
-        maxX: Math.max(...xs),
-        minY: Math.min(...ys),
-        maxY: Math.max(...ys)
-      };
+  const calculateUninterruptedRegularArea = (): Point[][] => {
+    const regularShapes = shapes.filter(shape => shape.type === 'regular');
+    const exclusionShapes = shapes.filter(shape => shape.type === 'exclusion');
+    const gridSize = 10;
+    const visited: Set<string> = new Set();
+    const regions: Point[][] = [];
+  
+    if (!dimensions) return [];
+  
+    // Helper to get grid key
+    const getKey = (x: number, y: number) => `${x},${y}`;
+  
+    // Check if a point is in an uninterrupted area
+    const isUninterrupted = (point: Point): boolean => {
+      let isInRegular = false;
+      let isExcluded = false;
+  
+      for (const shape of regularShapes) {
+        if (isPointInShape(point, shape.points)) {
+          isInRegular = true;
+          break;
+        }
+      }
+  
+      for (const shape of exclusionShapes) {
+        if (isPointInShape(point, shape.points)) {
+          isExcluded = true;
+          break;
+        }
+      }
+  
+      return isInRegular && !isExcluded;
     };
-
-    const bounds1 = getBounds(shape1);
-    const bounds2 = getBounds(shape2);
-
-    const intersectionWidth = Math.max(0, Math.min(bounds1.maxX, bounds2.maxX) - Math.max(bounds1.minX, bounds2.minX));
-    const intersectionHeight = Math.max(0, Math.min(bounds1.maxY, bounds2.maxY) - Math.max(bounds1.minY, bounds2.minY));
-
-    return intersectionWidth * intersectionHeight;
+  
+    // Flood fill to find connected region
+    const floodFill = (startX: number, startY: number): Point[] => {
+      const region: Point[] = [];
+      const queue: Point[] = [{ x: startX, y: startY }];
+      const directions = [
+        { dx: 0, dy: -gridSize }, // up
+        { dx: 0, dy: gridSize },  // down
+        { dx: -gridSize, dy: 0 }, // left
+        { dx: gridSize, dy: 0 },  // right
+      ];
+  
+      while (queue.length > 0) {
+        const { x, y } = queue.shift()!;
+        const key = getKey(x, y);
+  
+        if (
+          visited.has(key) ||
+          x < 0 || x >= dimensions.width ||
+          y < 0 || y >= dimensions.height ||
+          !isUninterrupted({ x, y })
+        ) {
+          continue;
+        }
+  
+        visited.add(key);
+        region.push({ x, y });
+  
+        for (const { dx, dy } of directions) {
+          queue.push({ x: x + dx, y: y + dy });
+        }
+      }
+  
+      return region;
+    };
+  
+    // Scan the grid for unvisited uninterrupted points
+    for (let x = 0; x < dimensions.width; x += gridSize) {
+      for (let y = 0; y < dimensions.height; y += gridSize) {
+        const key = getKey(x, y);
+        if (!visited.has(key) && isUninterrupted({ x, y })) {
+          const region = floodFill(x, y);
+          if (region.length > 0) {
+            regions.push(region);
+          }
+        }
+      }
+    }
+  
+    return regions;
   };
 
   const calculateTotalArea = (type: 'regular' | 'exclusion' | 'drip'): number => {
@@ -291,6 +355,9 @@ function App() {
     return inside;
   };
 
+  const uninterruptedRegions = useMemo(() => calculateUninterruptedRegularArea(), [shapes, dimensions]);
+
+
   const formatArea = (pixelArea: number): string => {
     if (!pixelRatio) return 'Set ruler first';
     const realArea = pixelArea * (pixelRatio * pixelRatio);
@@ -300,13 +367,12 @@ function App() {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !dimensions) return;
-
+  
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-
-    // Clear canvas
+  
     ctx.clearRect(0, 0, dimensions.width, dimensions.height);
-
+  
     // Draw ruler if exists
     if (ruler) {
       const color = getShapeColor('ruler');
@@ -314,33 +380,25 @@ function App() {
       ctx.lineWidth = 4;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
-      
       ctx.beginPath();
       ctx.moveTo(ruler.start.x, ruler.start.y);
       ctx.lineTo(ruler.end.x, ruler.end.y);
       ctx.stroke();
-
-      // Draw ruler length text
       ctx.fillStyle = color.stroke;
       ctx.font = '16px Arial';
       ctx.fillText(`${ruler.length} ${ruler.unit}`, (ruler.start.x + ruler.end.x) / 2, (ruler.start.y + ruler.end.y) / 2);
     }
-
+  
     // Draw all completed shapes
     shapes.forEach(shape => {
       if (shape.points.length > 2) {
         const color = getShapeColor(shape.type);
-        // Fill shape
         ctx.fillStyle = color.fill;
         ctx.beginPath();
         ctx.moveTo(shape.points[0].x, shape.points[0].y);
-        shape.points.forEach(point => {
-          ctx.lineTo(point.x, point.y);
-        });
+        shape.points.forEach(point => ctx.lineTo(point.x, point.y));
         ctx.closePath();
         ctx.fill();
-
-        // Draw shape outline
         ctx.strokeStyle = color.stroke;
         ctx.lineWidth = 4;
         ctx.lineCap = 'round';
@@ -348,42 +406,64 @@ function App() {
         ctx.stroke();
       }
     });
-
-    // Draw current shape
+  
+    // Draw uninterrupted regular areas and highlight hovered region
+    const gridSize = 10;
+    uninterruptedRegions.forEach((region, index) => {
+      const isHovered = index === hoveredRegionIndex;
+      ctx.fillStyle = isHovered ? 'rgba(46, 204, 113, 0.6)' : 'rgba(46, 204, 113, 0.2)';
+      region.forEach(point => {
+        ctx.fillRect(point.x, point.y, gridSize, gridSize);
+      });
+  
+      if (isHovered && hoverPosition) {
+        const area = calculateRegionArea(region);
+        const formattedArea = formatArea(area);
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+        const textWidth = ctx.measureText(formattedArea).width + 10;
+        const tooltipX = hoverPosition.x + 10;
+        const tooltipY = hoverPosition.y - 30;
+  
+        // Ensure tooltip stays within canvas bounds
+        const adjustedX = Math.min(tooltipX, dimensions.width - textWidth);
+        const adjustedY = Math.max(tooltipY, 20);
+  
+        ctx.fillRect(adjustedX, adjustedY, textWidth, 20);
+        ctx.fillStyle = 'white';
+        ctx.font = '12px Arial';
+        ctx.fillText(formattedArea, adjustedX + 5, adjustedY + 15);
+        console.log(`Drawing tooltip for region ${index}: ${formattedArea} at (${adjustedX}, ${adjustedY})`);
+      }
+    });
+  
+    // Draw current shape and path (existing code)
     if (currentShape.length > 0) {
       const color = getShapeColor(selectedTool);
       ctx.strokeStyle = color.stroke;
       ctx.lineWidth = 4;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
-      
       ctx.beginPath();
       ctx.moveTo(currentShape[0].x, currentShape[0].y);
-      currentShape.forEach(point => {
-        ctx.lineTo(point.x, point.y);
-      });
+      currentShape.forEach(point => ctx.lineTo(point.x, point.y));
       if (currentPath.length > 0) {
         ctx.lineTo(currentPath[currentPath.length - 1].x, currentPath[currentPath.length - 1].y);
       }
       ctx.stroke();
     }
-
-    // Draw current line
+  
     if (currentPath.length > 1) {
       const color = getShapeColor(selectedTool);
       ctx.strokeStyle = color.stroke;
       ctx.lineWidth = 4;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
-      
       ctx.beginPath();
       ctx.moveTo(currentPath[0].x, currentPath[0].y);
-      currentPath.forEach(point => {
-        ctx.lineTo(point.x, point.y);
-      });
+      currentPath.forEach(point => ctx.lineTo(point.x, point.y));
       ctx.stroke();
     }
-  }, [dimensions, shapes, currentShape, currentPath, selectedTool, ruler]);
+  }, [dimensions, shapes, currentShape, currentPath, selectedTool, ruler, hoveredRegionIndex, hoverPosition, uninterruptedRegions]);
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -396,23 +476,41 @@ function App() {
     setStartPoint({ x, y });
   };
 
+  const calculateRegionArea = (region: Point[]): number => {
+    const gridSize = 10;
+    return region.length * (gridSize * gridSize); // Area is number of grid cells times cell area
+  };
+
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!startPoint) return;
-
     const canvas = canvasRef.current;
-    if (!canvas) return;
-
+    if (!canvas || !dimensions) return;
+  
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-
-    // Check if we're near the start point
     const currentPoint = { x, y };
-    if (currentShape.length > 2 && isNearStartPoint(currentPoint, currentShape[0])) {
-      // Snap to start point
-      setCurrentPath([startPoint, currentShape[0]]);
+  
+    if (startPoint) {
+      // Existing drawing logic
+      if (currentShape.length > 2 && isNearStartPoint(currentPoint, currentShape[0])) {
+        setCurrentPath([startPoint, currentShape[0]]);
+      } else {
+        setCurrentPath([startPoint, currentPoint]);
+      }
     } else {
-      setCurrentPath([startPoint, currentPoint]);
+      // Hover logic
+      const gridSize = 10;
+      const gridX = Math.floor(x / gridSize) * gridSize;
+      const gridY = Math.floor(y / gridSize) * gridSize;
+  
+      const regionIndex = uninterruptedRegions.findIndex(region =>
+        region.some(p => p.x === gridX && p.y === gridY)
+      );
+  
+      if (regionIndex !== hoveredRegionIndex) {
+        setHoveredRegionIndex(regionIndex !== -1 ? regionIndex : null);
+        setHoverPosition(regionIndex !== -1 ? currentPoint : null);
+      }
     }
   };
 
@@ -457,6 +555,8 @@ function App() {
   const handleMouseLeave = () => {
     setStartPoint(null);
     setCurrentPath([]);
+    setHoveredRegionIndex(null);
+    setHoverPosition(null);
   };
 
   const handleRulerSubmit = () => {
