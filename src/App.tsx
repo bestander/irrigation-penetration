@@ -21,34 +21,38 @@ interface Ruler {
 
 type DrawingTool = 'regular' | 'exclusion' | 'drip' | 'ruler' | 'delete';
 
+const GRID_SIZE = 10;
+const SNAP_THRESHOLD = 10;
+
+const SHAPE_COLORS = {
+  regular: { fill: 'rgba(46, 204, 113, 0.2)', stroke: '#2ecc71' },
+  exclusion: { fill: 'rgba(231, 76, 60, 0.2)', stroke: '#e74c3c' },
+  drip: { fill: 'rgba(155, 89, 182, 0.2)', stroke: '#9b59b6' },
+  ruler: { fill: 'transparent', stroke: '#f1c40f' },
+  delete: { fill: 'transparent', stroke: '#e74c3c' },
+} as const;
+
 function App() {
-  const [image, setImage] = useState<string | null>(() => {
-    // Load image from localStorage on initial render
-    return localStorage.getItem('irrigationImage');
-  });
+  const [image, setImage] = useState<string | null>(() => localStorage.getItem('irrigationImage'));
   const [hoveredRegionIndex, setHoveredRegionIndex] = useState<number | null>(null);
   const [hoverPosition, setHoverPosition] = useState<Point | null>(null);
   const [dimensions, setDimensions] = useState<{ width: number; height: number } | null>(() => {
-    // Load dimensions from localStorage on initial render
     const savedDimensions = localStorage.getItem('irrigationDimensions');
     return savedDimensions ? JSON.parse(savedDimensions) : null;
   });
   const [startPoint, setStartPoint] = useState<Point | null>(null);
   const [currentPath, setCurrentPath] = useState<Point[]>([]);
   const [shapes, setShapes] = useState<Shape[]>(() => {
-    // Load shapes from localStorage on initial render
     const savedShapes = localStorage.getItem('irrigationShapes');
     return savedShapes ? JSON.parse(savedShapes) : [];
   });
   const [currentShape, setCurrentShape] = useState<Point[]>([]);
   const [selectedTool, setSelectedTool] = useState<DrawingTool>('regular');
   const [ruler, setRuler] = useState<Ruler | null>(() => {
-    // Load ruler from localStorage on initial render
     const savedRuler = localStorage.getItem('irrigationRuler');
     return savedRuler ? JSON.parse(savedRuler) : null;
   });
   const [pixelRatio, setPixelRatio] = useState<number | null>(() => {
-    // Load pixel ratio from localStorage on initial render
     const savedRatio = localStorage.getItem('irrigationPixelRatio');
     return savedRatio ? parseFloat(savedRatio) : null;
   });
@@ -57,28 +61,22 @@ function App() {
   const [rulerUnit, setRulerUnit] = useState<'ft' | 'm'>('ft');
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  const SNAP_THRESHOLD = 10; // pixels within which to snap to start point
-
-  // Save shapes to localStorage whenever they change
   useEffect(() => {
     localStorage.setItem('irrigationShapes', JSON.stringify(shapes));
   }, [shapes]);
 
-  // Save ruler to localStorage whenever it changes
   useEffect(() => {
     if (ruler) {
       localStorage.setItem('irrigationRuler', JSON.stringify(ruler));
     }
   }, [ruler]);
 
-  // Save pixel ratio to localStorage whenever it changes
   useEffect(() => {
     if (pixelRatio) {
       localStorage.setItem('irrigationPixelRatio', pixelRatio.toString());
     }
   }, [pixelRatio]);
 
-  // Save image and dimensions to localStorage whenever they change
   useEffect(() => {
     if (image) {
       localStorage.setItem('irrigationImage', image);
@@ -88,20 +86,7 @@ function App() {
     }
   }, [image, dimensions]);
 
-  const getShapeColor = (type: DrawingTool) => {
-    switch (type) {
-      case 'regular':
-        return { fill: 'rgba(46, 204, 113, 0.2)', stroke: '#2ecc71' };
-      case 'exclusion':
-        return { fill: 'rgba(231, 76, 60, 0.2)', stroke: '#e74c3c' };
-      case 'drip':
-        return { fill: 'rgba(155, 89, 182, 0.2)', stroke: '#9b59b6' };
-      case 'ruler':
-        return { fill: 'transparent', stroke: '#f1c40f' };
-      case 'delete':
-        return { fill: 'transparent', stroke: '#e74c3c' };
-    }
-  };
+  const getShapeColor = (type: DrawingTool) => SHAPE_COLORS[type];
 
   const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -121,7 +106,6 @@ function App() {
   };
 
   const calculatePixelArea = (points: Point[]): number => {
-    // Using the Shoelace formula (Surveyor's formula) to calculate area
     let area = 0;
     for (let i = 0; i < points.length; i++) {
       const j = (i + 1) % points.length;
@@ -143,49 +127,56 @@ function App() {
     return Math.sqrt(dx * dx + dy * dy);
   };
 
+  const isPointInShape = (point: Point, shape: Point[]): boolean => {
+    let inside = false;
+    for (let i = 0, j = shape.length - 1; i < shape.length; j = i++) {
+      const xi = shape[i].x, yi = shape[i].y;
+      const xj = shape[j].x, yj = shape[j].y;
+      
+      if (((yi > point.y) !== (yj > point.y)) &&
+          (point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi)) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  };
+
+  const getGridPoints = (width: number, height: number): Point[] => {
+    const points: Point[] = [];
+    for (let x = 0; x < width; x += GRID_SIZE) {
+      for (let y = 0; y < height; y += GRID_SIZE) {
+        points.push({ x, y });
+      }
+    }
+    return points;
+  };
+
   const calculateUninterruptedRegularArea = (): Point[][] => {
     const regularShapes = shapes.filter(shape => shape.type === 'regular');
     const exclusionShapes = shapes.filter(shape => shape.type === 'exclusion');
-    const gridSize = 10;
+    const dripShapes = shapes.filter(shape => shape.type === 'drip');
     const visited: Set<string> = new Set();
     const regions: Point[][] = [];
   
     if (!dimensions) return [];
   
-    // Helper to get grid key
     const getKey = (x: number, y: number) => `${x},${y}`;
   
-    // Check if a point is in an uninterrupted area
     const isUninterrupted = (point: Point): boolean => {
-      let isInRegular = false;
-      let isExcluded = false;
-  
-      for (const shape of regularShapes) {
-        if (isPointInShape(point, shape.points)) {
-          isInRegular = true;
-          break;
-        }
-      }
-  
-      for (const shape of exclusionShapes) {
-        if (isPointInShape(point, shape.points)) {
-          isExcluded = true;
-          break;
-        }
-      }
-  
-      return isInRegular && !isExcluded;
+      const isInRegular = regularShapes.some(shape => isPointInShape(point, shape.points));
+      const isExcluded = exclusionShapes.some(shape => isPointInShape(point, shape.points));
+      const isInDrip = dripShapes.some(shape => isPointInShape(point, shape.points));
+      return isInRegular && !isExcluded && !isInDrip;
     };
   
-    // Flood fill to find connected region
     const floodFill = (startX: number, startY: number): Point[] => {
       const region: Point[] = [];
       const queue: Point[] = [{ x: startX, y: startY }];
       const directions = [
-        { dx: 0, dy: -gridSize }, // up
-        { dx: 0, dy: gridSize },  // down
-        { dx: -gridSize, dy: 0 }, // left
-        { dx: gridSize, dy: 0 },  // right
+        { dx: 0, dy: -GRID_SIZE },
+        { dx: 0, dy: GRID_SIZE },
+        { dx: -GRID_SIZE, dy: 0 },
+        { dx: GRID_SIZE, dy: 0 },
       ];
   
       while (queue.length > 0) {
@@ -212,9 +203,8 @@ function App() {
       return region;
     };
   
-    // Scan the grid for unvisited uninterrupted points
-    for (let x = 0; x < dimensions.width; x += gridSize) {
-      for (let y = 0; y < dimensions.height; y += gridSize) {
+    for (let x = 0; x < dimensions.width; x += GRID_SIZE) {
+      for (let y = 0; y < dimensions.height; y += GRID_SIZE) {
         const key = getKey(x, y);
         if (!visited.has(key) && isUninterrupted({ x, y })) {
           const region = floodFill(x, y);
@@ -230,138 +220,79 @@ function App() {
 
   const calculateTotalArea = (type: 'regular' | 'exclusion' | 'drip'): number => {
     const shapesOfType = shapes.filter(shape => shape.type === type);
+    const exclusionShapes = shapes.filter(shape => shape.type === 'exclusion');
+    
+    if (!dimensions) return 0;
+
+    const gridPoints = getGridPoints(dimensions.width, dimensions.height);
     
     if (type === 'regular' || type === 'drip') {
-      // For regular and drip zones, we need to handle overlapping zones differently
-      // We'll take the maximum area of any zone that contains the current point
       let totalArea = 0;
-      const gridSize = 10; // Size of grid cells for area calculation
-      
-      if (!dimensions) return 0;
-      
-      // Create a grid of points to sample
-      for (let x = 0; x < dimensions.width; x += gridSize) {
-        for (let y = 0; y < dimensions.height; y += gridSize) {
-          const point = { x, y };
-          let maxArea = 0;
-          
-          // Check each shape
-          for (const shape of shapesOfType) {
-            if (isPointInShape(point, shape.points)) {
-              maxArea = Math.max(maxArea, shape.area);
-            }
-          }
-          
-          if (maxArea > 0) {
-            totalArea += gridSize * gridSize;
-          }
-        }
-      }
-
-      // Calculate exclusion area using union
-      const exclusionShapes = shapes.filter(shape => shape.type === 'exclusion');
       let exclusionArea = 0;
-      for (let x = 0; x < dimensions.width; x += gridSize) {
-        for (let y = 0; y < dimensions.height; y += gridSize) {
-          const point = { x, y };
-          let isExcluded = false;
-          
-          // Check each exclusion shape
-          for (const shape of exclusionShapes) {
-            if (isPointInShape(point, shape.points)) {
-              isExcluded = true;
-              break;
-            }
-          }
-          
-          if (isExcluded) {
-            exclusionArea += gridSize * gridSize;
-          }
-        }
-      }
-
-      // Calculate intersection with exclusion area
       let intersectionArea = 0;
-      for (let x = 0; x < dimensions.width; x += gridSize) {
-        for (let y = 0; y < dimensions.height; y += gridSize) {
-          const point = { x, y };
-          let isInZone = false;
-          let isExcluded = false;
-          
-          // Check if point is in any zone of the current type
-          for (const shape of shapesOfType) {
-            if (isPointInShape(point, shape.points)) {
-              isInZone = true;
-              break;
-            }
-          }
-          
-          // Check if point is in any exclusion zone
-          for (const shape of exclusionShapes) {
-            if (isPointInShape(point, shape.points)) {
-              isExcluded = true;
-              break;
-            }
-          }
-          
-          if (isInZone && isExcluded) {
-            intersectionArea += gridSize * gridSize;
-          }
+
+      gridPoints.forEach(point => {
+        const isInZone = shapesOfType.some(shape => isPointInShape(point, shape.points));
+        const isExcluded = exclusionShapes.some(shape => isPointInShape(point, shape.points));
+
+        if (isInZone) {
+          totalArea += GRID_SIZE * GRID_SIZE;
         }
-      }
+        if (isExcluded) {
+          exclusionArea += GRID_SIZE * GRID_SIZE;
+        }
+        if (isInZone && isExcluded) {
+          intersectionArea += GRID_SIZE * GRID_SIZE;
+        }
+      });
 
       return Math.max(0, totalArea - intersectionArea);
     } else {
-      // For exclusion zones, use the same grid approach to calculate union
-      let totalArea = 0;
-      const gridSize = 10;
-      
-      if (!dimensions) return 0;
-      
-      for (let x = 0; x < dimensions.width; x += gridSize) {
-        for (let y = 0; y < dimensions.height; y += gridSize) {
-          const point = { x, y };
-          let isExcluded = false;
-          
-          // Check each exclusion shape
-          for (const shape of shapesOfType) {
-            if (isPointInShape(point, shape.points)) {
-              isExcluded = true;
-              break;
-            }
-          }
-          
-          if (isExcluded) {
-            totalArea += gridSize * gridSize;
-          }
+      return gridPoints.reduce((area, point) => {
+        if (shapesOfType.some(shape => isPointInShape(point, shape.points))) {
+          return area + GRID_SIZE * GRID_SIZE;
         }
-      }
-
-      return totalArea;
+        return area;
+      }, 0);
     }
-  };
-
-  const isPointInShape = (point: Point, shape: Point[]): boolean => {
-    let inside = false;
-    for (let i = 0, j = shape.length - 1; i < shape.length; j = i++) {
-      const xi = shape[i].x, yi = shape[i].y;
-      const xj = shape[j].x, yj = shape[j].y;
-      
-      if (((yi > point.y) !== (yj > point.y)) &&
-          (point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi)) {
-        inside = !inside;
-      }
-    }
-    return inside;
   };
 
   const uninterruptedRegions = useMemo(() => calculateUninterruptedRegularArea(), [shapes, dimensions]);
-
 
   const formatArea = (pixelArea: number): string => {
     if (!pixelRatio) return 'Set ruler first';
     const realArea = pixelArea * (pixelRatio * pixelRatio);
     return `${realArea.toFixed(2)} ${ruler?.unit || 'ft'}²`;
+  };
+
+  const drawShape = (ctx: CanvasRenderingContext2D, shape: Shape) => {
+    if (shape.points.length <= 2) return;
+
+    const color = getShapeColor(shape.type);
+    ctx.fillStyle = color.fill;
+    ctx.beginPath();
+    ctx.moveTo(shape.points[0].x, shape.points[0].y);
+    shape.points.forEach(point => ctx.lineTo(point.x, point.y));
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = color.stroke;
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+  };
+
+  const drawPath = (ctx: CanvasRenderingContext2D, points: Point[], color: typeof SHAPE_COLORS[keyof typeof SHAPE_COLORS]) => {
+    if (points.length <= 1) return;
+
+    ctx.strokeStyle = color.stroke;
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    points.forEach(point => ctx.lineTo(point.x, point.y));
+    ctx.stroke();
   };
 
   useEffect(() => {
@@ -373,47 +304,21 @@ function App() {
   
     ctx.clearRect(0, 0, dimensions.width, dimensions.height);
   
-    // Draw ruler if exists
     if (ruler) {
       const color = getShapeColor('ruler');
-      ctx.strokeStyle = color.stroke;
-      ctx.lineWidth = 4;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      ctx.beginPath();
-      ctx.moveTo(ruler.start.x, ruler.start.y);
-      ctx.lineTo(ruler.end.x, ruler.end.y);
-      ctx.stroke();
+      drawPath(ctx, [ruler.start, ruler.end], color);
       ctx.fillStyle = color.stroke;
       ctx.font = '16px Arial';
       ctx.fillText(`${ruler.length} ${ruler.unit}`, (ruler.start.x + ruler.end.x) / 2, (ruler.start.y + ruler.end.y) / 2);
     }
   
-    // Draw all completed shapes
-    shapes.forEach(shape => {
-      if (shape.points.length > 2) {
-        const color = getShapeColor(shape.type);
-        ctx.fillStyle = color.fill;
-        ctx.beginPath();
-        ctx.moveTo(shape.points[0].x, shape.points[0].y);
-        shape.points.forEach(point => ctx.lineTo(point.x, point.y));
-        ctx.closePath();
-        ctx.fill();
-        ctx.strokeStyle = color.stroke;
-        ctx.lineWidth = 4;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.stroke();
-      }
-    });
+    shapes.forEach(shape => drawShape(ctx, shape));
   
-    // Draw uninterrupted regular areas and highlight hovered region
-    const gridSize = 10;
     uninterruptedRegions.forEach((region, index) => {
       const isHovered = index === hoveredRegionIndex;
       ctx.fillStyle = isHovered ? 'rgba(46, 204, 113, 0.6)' : 'rgba(46, 204, 113, 0.2)';
       region.forEach(point => {
-        ctx.fillRect(point.x, point.y, gridSize, gridSize);
+        ctx.fillRect(point.x, point.y, GRID_SIZE, GRID_SIZE);
       });
   
       if (isHovered && hoverPosition) {
@@ -424,7 +329,6 @@ function App() {
         const tooltipX = hoverPosition.x + 10;
         const tooltipY = hoverPosition.y - 30;
   
-        // Ensure tooltip stays within canvas bounds
         const adjustedX = Math.min(tooltipX, dimensions.width - textWidth);
         const adjustedY = Math.max(tooltipY, 20);
   
@@ -432,36 +336,20 @@ function App() {
         ctx.fillStyle = 'white';
         ctx.font = '12px Arial';
         ctx.fillText(formattedArea, adjustedX + 5, adjustedY + 15);
-        console.log(`Drawing tooltip for region ${index}: ${formattedArea} at (${adjustedX}, ${adjustedY})`);
       }
     });
   
-    // Draw current shape and path (existing code)
     if (currentShape.length > 0) {
       const color = getShapeColor(selectedTool);
-      ctx.strokeStyle = color.stroke;
-      ctx.lineWidth = 4;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      ctx.beginPath();
-      ctx.moveTo(currentShape[0].x, currentShape[0].y);
-      currentShape.forEach(point => ctx.lineTo(point.x, point.y));
+      const points = [...currentShape];
       if (currentPath.length > 0) {
-        ctx.lineTo(currentPath[currentPath.length - 1].x, currentPath[currentPath.length - 1].y);
+        points.push(currentPath[currentPath.length - 1]);
       }
-      ctx.stroke();
+      drawPath(ctx, points, color);
     }
   
     if (currentPath.length > 1) {
-      const color = getShapeColor(selectedTool);
-      ctx.strokeStyle = color.stroke;
-      ctx.lineWidth = 4;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      ctx.beginPath();
-      ctx.moveTo(currentPath[0].x, currentPath[0].y);
-      currentPath.forEach(point => ctx.lineTo(point.x, point.y));
-      ctx.stroke();
+      drawPath(ctx, currentPath, getShapeColor(selectedTool));
     }
   }, [dimensions, shapes, currentShape, currentPath, selectedTool, ruler, hoveredRegionIndex, hoverPosition, uninterruptedRegions]);
 
@@ -491,17 +379,14 @@ function App() {
     const currentPoint = { x, y };
   
     if (startPoint) {
-      // Existing drawing logic
       if (currentShape.length > 2 && isNearStartPoint(currentPoint, currentShape[0])) {
         setCurrentPath([startPoint, currentShape[0]]);
       } else {
         setCurrentPath([startPoint, currentPoint]);
       }
     } else {
-      // Hover logic
-      const gridSize = 10;
-      const gridX = Math.floor(x / gridSize) * gridSize;
-      const gridY = Math.floor(y / gridSize) * gridSize;
+      const gridX = Math.floor(x / GRID_SIZE) * GRID_SIZE;
+      const gridY = Math.floor(y / GRID_SIZE) * GRID_SIZE;
   
       const regionIndex = uninterruptedRegions.findIndex(region =>
         region.some(p => p.x === gridX && p.y === gridY)
@@ -523,26 +408,28 @@ function App() {
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-
     const currentPoint = { x, y };
 
     if (selectedTool === 'ruler') {
       setRuler({ start: startPoint, end: currentPoint, length: 0, unit: 'ft' });
       setShowRulerPrompt(true);
+    } else if (selectedTool === 'delete') {
+      const clickPoint = { x, y };
+      const shapeIndex = shapes.findIndex(shape => isPointInShape(clickPoint, shape.points));
+      
+      if (shapeIndex !== -1) {
+        setShapes(prev => prev.filter((_, index) => index !== shapeIndex));
+      }
     } else {
-      // If this is the first line
       if (currentShape.length === 0) {
         setCurrentShape([startPoint, currentPoint]);
       } else {
-        // Check if we're near the start point
         if (isNearStartPoint(currentPoint, currentShape[0])) {
-          // Close the shape
           const closedShape = [...currentShape, currentShape[0]];
           const area = calculatePixelArea(closedShape);
           setShapes(prev => [...prev, { points: closedShape, area, type: selectedTool }]);
           setCurrentShape([]);
         } else {
-          // Add line to current shape
           setCurrentShape(prev => [...prev, currentPoint]);
         }
       }
@@ -585,23 +472,19 @@ function App() {
     const y = e.clientY - rect.top;
     const clickPoint = { x, y };
 
-    // Find the first shape that contains the click point
     const shapeIndex = shapes.findIndex(shape => isPointInShape(clickPoint, shape.points));
     
     if (shapeIndex !== -1) {
-      // Remove the shape at the found index
       setShapes(prev => prev.filter((_, index) => index !== shapeIndex));
     }
   };
 
   const handleClearAll = () => {
-    // Clear all localStorage items
     localStorage.removeItem('irrigationShapes');
     localStorage.removeItem('irrigationRuler');
     localStorage.removeItem('irrigationPixelRatio');
     localStorage.removeItem('irrigationImage');
     localStorage.removeItem('irrigationDimensions');
-    // Reload the page
     window.location.reload();
   };
 
