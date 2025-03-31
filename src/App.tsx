@@ -47,6 +47,9 @@ function App() {
     const savedDimensions = localStorage.getItem('irrigationDimensions');
     return savedDimensions ? JSON.parse(savedDimensions) : null;
   });
+  const [canvasScale, setCanvasScale] = useState<number>(1);
+  const [containerSize, setContainerSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
+  const containerRef = useRef<HTMLDivElement>(null);
   const [startPoint, setStartPoint] = useState<Point | null>(null);
   const [currentPath, setCurrentPath] = useState<Point[]>([]);
   const [shapes, setShapes] = useState<Shape[]>(() => {
@@ -93,6 +96,25 @@ function App() {
       localStorage.setItem('irrigationDimensions', JSON.stringify(dimensions));
     }
   }, [image, dimensions]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (containerRef.current) {
+        const { width, height } = containerRef.current.getBoundingClientRect();
+        setContainerSize({ width, height });
+        
+        if (dimensions) {
+          const scaleX = width / dimensions.width;
+          const scaleY = height / dimensions.height;
+          setCanvasScale(Math.min(scaleX, scaleY));
+        }
+      }
+    };
+
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [dimensions]);
 
   const getShapeColor = (type: DrawingTool) => SHAPE_COLORS[type];
 
@@ -275,6 +297,18 @@ function App() {
     ctx.stroke();
   };
 
+  const getCanvasPoint = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>): Point => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+
+    const rect = canvas.getBoundingClientRect();
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    const x = (clientX - rect.left) / canvasScale;
+    const y = (clientY - rect.top) / canvasScale;
+    return { x, y };
+  };
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !dimensions) return;
@@ -282,7 +316,13 @@ function App() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    ctx.clearRect(0, 0, dimensions.width, dimensions.height);
+    // Set canvas size to match container
+    canvas.width = containerSize.width;
+    canvas.height = containerSize.height;
+
+    // Clear and scale context
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.scale(canvasScale, canvasScale);
 
     if (ruler) {
       const color = getShapeColor('ruler');
@@ -341,27 +381,19 @@ function App() {
     if (currentPath.length > 1) {
       drawPath(ctx, currentPath, getShapeColor(selectedTool));
     }
-  }, [dimensions, shapes, currentShape, currentPath, selectedTool, ruler, hoveredRegionIndex, hoverPosition, zoneRegions, showHover]);
+  }, [dimensions, shapes, currentShape, currentPath, selectedTool, ruler, hoveredRegionIndex, hoverPosition, zoneRegions, showHover, containerSize, canvasScale]);
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    setStartPoint({ x, y });
+    const point = getCanvasPoint(e);
+    setStartPoint(point);
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas || !dimensions) return;
 
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const currentPoint = { x, y };
+    const point = getCanvasPoint(e);
+    const currentPoint = point;
 
     if (startPoint) {
       if (currentShape.length > 2 && isNearStartPoint(currentPoint, currentShape[0])) {
@@ -370,8 +402,8 @@ function App() {
         setCurrentPath([startPoint, currentPoint]);
       }
     } else {
-      const gridX = Math.floor(x / GRID_SIZE) * GRID_SIZE;
-      const gridY = Math.floor(y / GRID_SIZE) * GRID_SIZE;
+      const gridX = Math.floor(point.x / GRID_SIZE) * GRID_SIZE;
+      const gridY = Math.floor(point.y / GRID_SIZE) * GRID_SIZE;
 
       const regionIndex = zoneRegions.findIndex(region =>
         region.points.some(p => p.x === gridX && p.y === gridY)
@@ -387,20 +419,14 @@ function App() {
   const handleMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!startPoint) return;
 
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const currentPoint = { x, y };
+    const point = getCanvasPoint(e);
+    const currentPoint = point;
 
     if (selectedTool === 'ruler') {
       setRuler({ start: startPoint, end: currentPoint, length: 0, unit: 'ft' });
       setShowRulerPrompt(true);
     } else if (selectedTool === 'delete') {
-      const clickPoint = { x, y };
-      const shapeIndex = shapes.findIndex(shape => isPointInShape(clickPoint, shape.points));
+      const shapeIndex = shapes.findIndex(shape => isPointInShape(currentPoint, shape.points));
 
       if (shapeIndex !== -1) {
         setShapes(prev => prev.filter((_, index) => index !== shapeIndex));
@@ -449,15 +475,8 @@ function App() {
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (selectedTool !== 'delete') return;
 
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const clickPoint = { x, y };
-
-    const shapeIndex = shapes.findIndex(shape => isPointInShape(clickPoint, shape.points));
+    const point = getCanvasPoint(e);
+    const shapeIndex = shapes.findIndex(shape => isPointInShape(point, shape.points));
 
     if (shapeIndex !== -1) {
       setShapes(prev => prev.filter((_, index) => index !== shapeIndex));
@@ -471,6 +490,91 @@ function App() {
     localStorage.removeItem('irrigationImage');
     localStorage.removeItem('irrigationDimensions');
     window.location.reload();
+  };
+
+  const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const point = getCanvasPoint(e);
+    
+    if (selectedTool === 'delete') {
+      const shapeIndex = shapes.findIndex(shape => isPointInShape(point, shape.points));
+      if (shapeIndex !== -1) {
+        setShapes(prev => prev.filter((_, index) => index !== shapeIndex));
+      }
+    } else {
+      setStartPoint(point);
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const canvas = canvasRef.current;
+    if (!canvas || !dimensions) return;
+
+    const point = getCanvasPoint(e);
+    const currentPoint = point;
+
+    if (startPoint) {
+      if (currentShape.length > 2 && isNearStartPoint(currentPoint, currentShape[0])) {
+        setCurrentPath([startPoint, currentShape[0]]);
+      } else {
+        setCurrentPath([startPoint, currentPoint]);
+      }
+    } else {
+      const gridX = Math.floor(point.x / GRID_SIZE) * GRID_SIZE;
+      const gridY = Math.floor(point.y / GRID_SIZE) * GRID_SIZE;
+
+      const regionIndex = zoneRegions.findIndex(region =>
+        region.points.some(p => p.x === gridX && p.y === gridY)
+      );
+
+      if (regionIndex !== hoveredRegionIndex) {
+        setHoveredRegionIndex(regionIndex !== -1 ? regionIndex : null);
+        setHoverPosition(regionIndex !== -1 ? currentPoint : null);
+      }
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    if (!startPoint) return;
+
+    const point = getCanvasPoint(e);
+    const currentPoint = point;
+
+    if (selectedTool === 'ruler') {
+      setRuler({ start: startPoint, end: currentPoint, length: 0, unit: 'ft' });
+      setShowRulerPrompt(true);
+    } else if (selectedTool === 'delete') {
+      const shapeIndex = shapes.findIndex(shape => isPointInShape(currentPoint, shape.points));
+
+      if (shapeIndex !== -1) {
+        setShapes(prev => prev.filter((_, index) => index !== shapeIndex));
+      }
+    } else {
+      if (currentShape.length === 0) {
+        setCurrentShape([startPoint, currentPoint]);
+      } else {
+        if (isNearStartPoint(currentPoint, currentShape[0])) {
+          const closedShape = [...currentShape, currentShape[0]];
+          const area = calculatePixelArea(closedShape);
+          setShapes(prev => [...prev, { points: closedShape, area, type: selectedTool }]);
+          setCurrentShape([]);
+        } else {
+          setCurrentShape(prev => [...prev, currentPoint]);
+        }
+      }
+    }
+
+    setStartPoint(null);
+    setCurrentPath([]);
+  };
+
+  const handleTouchCancel = () => {
+    setStartPoint(null);
+    setCurrentPath([]);
+    setHoveredRegionIndex(null);
+    setHoverPosition(null);
   };
 
   return (
@@ -501,19 +605,22 @@ function App() {
 
       <div className="workspace">
         {image ? (
-          <div className="image-container">
+          <div className="image-container" ref={containerRef}>
             <img src={image} alt="Backyard plan" className="backyard-plan" />
             {dimensions && (
               <canvas
                 ref={canvasRef}
-                width={dimensions.width}
-                height={dimensions.height}
                 onMouseDown={handleMouseDown}
                 onMouseMove={handleMouseMove}
                 onMouseUp={handleMouseUp}
                 onMouseLeave={handleMouseLeave}
                 onClick={handleCanvasClick}
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
+                onTouchCancel={handleTouchCancel}
                 className="drawing-layer"
+                style={{ touchAction: 'none' }}
               />
             )}
           </div>
